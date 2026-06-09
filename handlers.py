@@ -24,12 +24,12 @@ async def check_channel_subscription(user_id: int, channel_username: str) -> boo
         return False
 
 async def post_to_channels(text: str):
-    """Отправляет пост в оба канала"""
     for channel in CHANNELS:
         try:
             await bot.send_message(f"@{channel}", text)
-        except:
-            pass
+            print(f"✅ Пост в @{channel}")
+        except Exception as e:
+            print(f"❌ Ошибка @{channel}: {e}")
 
 @router.message(F.photo)
 async def get_file_id_for_admin(message: Message):
@@ -45,9 +45,7 @@ async def cmd_start(message: Message):
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="▶️ Играть", callback_data="start_game")],
-        [InlineKeyboardButton(text="🔄 Начать заново", callback_data="reset_game")],
-        [InlineKeyboardButton(text="🏆 Рейтинг", callback_data="show_top")],
-        [InlineKeyboardButton(text="🏅 Достижения", callback_data="show_achievements")]
+        [InlineKeyboardButton(text="🔄 Начать заново", callback_data="reset_game")]
     ])
     await message.answer(
         f"🐕 Добро пожаловать, {username}!\n\nТы — пёс. Твоя цель — заслужить уважение Богини Милы.\n\n📌 Используй кнопки ниже:",
@@ -76,60 +74,9 @@ async def reset_game(callback: CallbackQuery):
     except:
         pass
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="▶️ Играть", callback_data="start_game")],
-        [InlineKeyboardButton(text="🏆 Рейтинг", callback_data="show_top")]
+        [InlineKeyboardButton(text="▶️ Играть", callback_data="start_game")]
     ])
     await callback.message.answer("🔄 Прогресс сброшен!\n\nТы начинаешь с чистого листа.", reply_markup=keyboard)
-
-@router.callback_query(F.data == "show_top")
-async def show_top_callback(callback: CallbackQuery):
-    leaderboard = await get_leaderboard(10)
-    if not leaderboard:
-        await callback.message.answer("📊 Пока никого в рейтинге. Будь первым!")
-        return
-    text = "🏆 РЕЙТИНГ ПСОВ БОГИНИ МИЛЫ 🏆\n\n"
-    for i, (username, attention, submission, _) in enumerate(leaderboard, 1):
-        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "🔹"
-        text += f"{medal} {i}. {username} — уважение: {attention}, подчинение: {submission}\n"
-    await callback.message.answer(text)
-
-@router.callback_query(F.data == "show_achievements")
-async def show_achievements_callback(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    achievements = await get_achievements(user_id)
-    if not achievements:
-        await callback.message.answer("🏅 У тебя пока нет достижений. Проходи игру, чтобы их получить!")
-        return
-    text = "🏅 ТВОИ ДОСТИЖЕНИЯ 🏅\n\n"
-    for ach in achievements:
-        text += f"✓ {ach}\n"
-    await callback.message.answer(text)
-
-@router.message(Command("status"))
-async def cmd_status(message: Message):
-    player = await get_player(message.from_user.id)
-    if not player:
-        await message.answer("Сначала напиши /start")
-        return
-    attention = player[4]
-    if attention >= 90:
-        title = "Пёс Богини 👑"
-    elif attention >= 60:
-        title = "Любимчик ⭐"
-    elif attention >= 30:
-        title = "Сторожевой 🛡️"
-    else:
-        title = "Дворняга 🐕"
-    await message.answer(
-        f"📊 ТВОИ ПАРАМЕТРЫ:\n"
-        f"👑 Звание: {title}\n"
-        f"🐕 Подчинение: {player[2]}\n"
-        f"⚔️ Смелость: {player[3]}\n"
-        f"👁 Внимание Богини Милы: {player[4]}\n"
-        f"😖 Стыд: {player[5]}\n"
-        f"❤️ Привязанность: {player[6]}\n"
-        f"😈 Бунт: {player[7]}"
-    )
 
 @router.message(Command("play"))
 async def cmd_play(message: Message):
@@ -178,25 +125,13 @@ async def handle_choice(callback: CallbackQuery):
         return
     
     choice = choices[choice_idx]
-    effects = choice.get("effects", {})
-    
-    await update_player_stats(
-        user_id,
-        submission_delta=effects.get("submission", 0),
-        bravery_delta=effects.get("bravery", 0),
-        attention_delta=effects.get("attention", 0),
-        shame_delta=effects.get("shame", 0),
-        devotion_delta=effects.get("devotion", 0),
-        rebellion_delta=effects.get("rebellion", 0)
-    )
-    
     next_scene_id = choice.get("next_scene")
     
+    # Проверка подписки
     if next_scene_id == "chap5_check":
         channels_ok = all([await check_channel_subscription(user_id, ch) for ch in CHANNELS])
         if channels_ok:
             await verify_tasks(user_id)
-            await add_achievement(user_id, "👑 Верный пёс Богини Милы")
             await callback.message.edit_text("✅ Богиня Мила довольна! Ты выполнил задания. Продолжай свой путь.")
             await asyncio.sleep(1)
             next_scene_id = "chap5_scene1"
@@ -207,33 +142,31 @@ async def handle_choice(callback: CallbackQuery):
             await show_scene(callback.message, user_id, scenes["chap5_tasks"], "chap5_tasks")
             return
     
-    # ========== ПРОВЕРКА НА ФИНАЛ И ПОСТ В КАНАЛЫ ==========
-    is_final = False
-    final_title = ""
-    
-    if next_scene_id == "chap6_ideal":
-        await set_ending(user_id, "ideal")
-        final_title = "🏆 ИДЕАЛЬНЫЙ ФИНАЛ 🏆"
-        is_final = True
-    elif next_scene_id == "chap6_neutral":
-        await set_ending(user_id, "neutral")
-        final_title = "🔸 НЕЙТРАЛЬНЫЙ ФИНАЛ 🔸"
-        is_final = True
-    elif next_scene_id == "chap6_bad":
-        await set_ending(user_id, "bad")
-        final_title = "🔻 ПЛОХОЙ ФИНАЛ 🔻"
-        is_final = True
-    
-    # Если это финал — отправляем пост в каналы
-    if is_final:
+    # ========== ПОСТ В КАНАЛЫ ПРИ ЛЮБОЙ КОНЦОВКЕ ==========
+    if next_scene_id in ["chap6_ideal", "chap6_neutral", "chap6_bad"]:
+        # Сохраняем концовку
+        if next_scene_id == "chap6_ideal":
+            await set_ending(user_id, "ideal")
+            final_title = "🏆 ИДЕАЛЬНЫЙ ФИНАЛ 🏆"
+        elif next_scene_id == "chap6_neutral":
+            await set_ending(user_id, "neutral")
+            final_title = "🔸 НЕЙТРАЛЬНЫЙ ФИНАЛ 🔸"
+        elif next_scene_id == "chap6_bad":
+            await set_ending(user_id, "bad")
+            final_title = "🔻 ПЛОХОЙ ФИНАЛ 🔻"
+        
+        # Отправляем пост
         player = await get_player(user_id)
         username = player[1] if player else "Неизвестный пёс"
-        attention = player[4] if player else 0
-        submission = player[2] if player else 0
         
-        post_text = f"📢 НОВОЕ ПРОХОЖДЕНИЕ!\n\n@{username} прошёл игру «Бесконечное унижение»\n\nРезультат: {final_title}\n👁 Внимание Богини: {attention}\n🐕 Подчинение: {submission}\n\n🤖 БОТ ДЛЯ ПСИН И ДОМИН: @dominasearch24_bot"
+        post_text = f"📢 НОВОЕ ПРОХОЖДЕНИЕ!\n\n@{username} прошёл игру «Бесконечное унижение»\n\nРезультат: {final_title}\n\n🤖 БОТ ДЛЯ ПСИН И ДОМИН: @dominasearch24_bot"
         
-        await post_to_channels(post_text)
+        for channel in CHANNELS:
+            try:
+                await bot.send_message(f"@{channel}", post_text)
+                print(f"✅ Пост отправлен в @{channel}")
+            except Exception as e:
+                print(f"❌ Ошибка @{channel}: {e}")
     
     if next_scene_id:
         await update_current_scene(user_id, next_scene_id)
@@ -260,8 +193,7 @@ async def cmd_reset(message: Message):
     user_id = message.from_user.id
     await reset_player(user_id)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="▶️ Играть", callback_data="start_game")],
-        [InlineKeyboardButton(text="🏆 Рейтинг", callback_data="show_top")]
+        [InlineKeyboardButton(text="▶️ Играть", callback_data="start_game")]
     ])
     await message.answer("🔄 Прогресс сброшен!\n\nНачинай сначала командой /play", reply_markup=keyboard)
 
@@ -289,8 +221,8 @@ async def admin_players(callback: CallbackQuery):
         await callback.message.answer("📭 Нет игроков")
         return
     text = "👥 СПИСОК ИГРОКОВ:\n\n"
-    for user_id, username, submission, bravery, attention, scene in players[:20]:
-        text += f"• {username} — подч: {submission}, уваж: {attention}\n"
+    for user_id, username, current_scene in players[:20]:
+        text += f"• {username}\n"
     await callback.message.answer(text)
 
 @router.callback_query(F.data == "admin_stats")
@@ -298,7 +230,5 @@ async def admin_stats(callback: CallbackQuery):
     stats = await get_stats()
     await callback.message.answer(
         f"📊 СТАТИСТИКА БОТА:\n\n"
-        f"👥 Всего игроков: {stats['total_players']}\n"
-        f"🐕 Среднее подчинение: {stats['avg_submission']}\n"
-        f"👁 Среднее внимание: {stats['avg_attention']}"
+        f"👥 Всего игроков: {stats['total_players']}"
     )
