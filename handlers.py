@@ -23,11 +23,11 @@ async def check_channel_subscription(user_id: int, channel_username: str) -> boo
     except:
         return False
 
-async def post_confession_to_channels(text: str, username: str):
-    message_text = f"📜 ИСПОВЕДЬ ПСА\n\nОт: @{username}\n\n{text}"
+async def post_to_channels(text: str):
+    """Отправляет пост в оба канала"""
     for channel in CHANNELS:
         try:
-            await bot.send_message(f"@{channel}", message_text)
+            await bot.send_message(f"@{channel}", text)
         except:
             pass
 
@@ -207,12 +207,33 @@ async def handle_choice(callback: CallbackQuery):
             await show_scene(callback.message, user_id, scenes["chap5_tasks"], "chap5_tasks")
             return
     
+    # ========== ПРОВЕРКА НА ФИНАЛ И ПОСТ В КАНАЛЫ ==========
+    is_final = False
+    final_title = ""
+    
     if next_scene_id == "chap6_ideal":
         await set_ending(user_id, "ideal")
+        final_title = "🏆 ИДЕАЛЬНЫЙ ФИНАЛ 🏆"
+        is_final = True
     elif next_scene_id == "chap6_neutral":
         await set_ending(user_id, "neutral")
+        final_title = "🔸 НЕЙТРАЛЬНЫЙ ФИНАЛ 🔸"
+        is_final = True
     elif next_scene_id == "chap6_bad":
         await set_ending(user_id, "bad")
+        final_title = "🔻 ПЛОХОЙ ФИНАЛ 🔻"
+        is_final = True
+    
+    # Если это финал — отправляем пост в каналы
+    if is_final:
+        player = await get_player(user_id)
+        username = player[1] if player else "Неизвестный пёс"
+        attention = player[4] if player else 0
+        submission = player[2] if player else 0
+        
+        post_text = f"📢 НОВОЕ ПРОХОЖДЕНИЕ!\n\n@{username} прошёл игру «Бесконечное унижение»\n\nРезультат: {final_title}\n👁 Внимание Богини: {attention}\n🐕 Подчинение: {submission}\n\n🤖 БОТ ДЛЯ ПСИН И ДОМИН: @dominasearch24_bot"
+        
+        await post_to_channels(post_text)
     
     if next_scene_id:
         await update_current_scene(user_id, next_scene_id)
@@ -224,10 +245,6 @@ async def handle_choice(callback: CallbackQuery):
                 pass
             await show_scene(callback.message, user_id, next_scene, next_scene_id)
 
-@router.callback_query(F.data == "open_confess")
-async def open_confess(callback: CallbackQuery):
-    await callback.message.answer("📝 Напиши свою исповедь командой /confess [текст]\n\nПример: /confess Я был непослушным псом")
-
 @router.callback_query(F.data == "reset_and_play")
 async def reset_and_play(callback: CallbackQuery):
     user_id = callback.from_user.id
@@ -237,26 +254,6 @@ async def reset_and_play(callback: CallbackQuery):
     except:
         pass
     await cmd_play(callback.message)
-
-@router.message(Command("confess"))
-async def cmd_confess(message: Message):
-    user_id = message.from_user.id
-    ending = await get_ending(user_id)
-    
-    if not ending:
-        await message.answer("Ты ещё не прошёл игру. Исповедь доступна только после финала.")
-        return
-    
-    text = message.text.replace("/confess", "").strip()
-    if not text:
-        await message.answer("Напиши свою исповедь после команды, например: /confess Я люблю быть псом")
-        return
-    
-    username = message.from_user.username or message.from_user.first_name
-    
-    await post_confession_to_channels(text, username)
-    
-    await message.answer("🙏 Богиня Мила услышала твою исповедь.")
 
 @router.message(Command("reset"))
 async def cmd_reset(message: Message):
